@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dudelsack - Learn German Noun Genders</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            20%, 60% { transform: translateX(-8px); }
+            40%, 80% { transform: translateX(8px); }
+        }
+        .shake {
+            animation: shake 0.4s ease-in-out;
+        }
+        .fade-in {
+            animation: fadeIn 0.3s ease-in;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: scale(0.95); }
+            to { opacity: 1; transform: scale(1); }
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        .spinner {
+            animation: spin 1s linear infinite;
+        }
+    </style>
+</head>
+<body class="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 text-white font-sans">
+    <div class="container mx-auto px-4 py-8 min-h-screen flex flex-col">
+        <!-- Header with Scores -->
+        <header class="flex justify-between items-start mb-8">
+            <div>
+                <h1 class="text-2xl md:text-3xl font-bold text-slate-300">Dudelsack</h1>
+                <p id="nounCount" class="text-sm text-slate-500 mt-1"></p>
+            </div>
+            <div class="text-right">
+                <div class="text-sm text-slate-400">Highest Streak</div>
+                <div id="highestStreak" class="text-3xl font-bold text-amber-400">0</div>
+                <div class="text-sm text-slate-400 mt-2">Current Streak</div>
+                <div id="currentStreak" class="text-3xl font-bold text-emerald-400">0</div>
+            </div>
+        </header>
+
+        <!-- Main Game Area -->
+        <main class="flex-1 flex flex-col justify-center items-center">
+            <!-- Loading State -->
+            <div id="loadingState" class="text-center">
+                <div class="w-12 h-12 border-4 border-slate-600 border-t-emerald-400 rounded-full spinner mx-auto mb-4"></div>
+                <p class="text-slate-400">Loading nouns...</p>
+            </div>
+
+            <!-- Error State -->
+            <div id="errorState" class="text-center hidden">
+                <p class="text-red-400 text-xl mb-4">Failed to load nouns</p>
+                <button id="retryBtn" class="px-6 py-3 bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors">
+                    Try Again
+                </button>
+            </div>
+
+            <!-- Game Area (hidden until loaded) -->
+            <div id="gameArea" class="hidden w-full flex flex-col items-center">
+                <!-- Word Display -->
+                <div class="text-center mb-12">
+                    <p class="text-slate-400 text-lg mb-2">What is the article for...</p>
+                    <h2 id="currentWord" class="text-5xl md:text-7xl font-bold text-white fade-in">...</h2>
+                </div>
+
+                <!-- Article Buttons -->
+                <div class="flex flex-col sm:flex-row gap-4 w-full max-w-lg">
+                    <button
+                        data-article="der"
+                        class="article-btn flex-1 py-6 px-8 text-2xl font-bold rounded-xl bg-slate-700 hover:bg-slate-600 transition-all duration-200 active:scale-95"
+                    >
+                        der
+                    </button>
+                    <button
+                        data-article="die"
+                        class="article-btn flex-1 py-6 px-8 text-2xl font-bold rounded-xl bg-slate-700 hover:bg-slate-600 transition-all duration-200 active:scale-95"
+                    >
+                        die
+                    </button>
+                    <button
+                        data-article="das"
+                        class="article-btn flex-1 py-6 px-8 text-2xl font-bold rounded-xl bg-slate-700 hover:bg-slate-600 transition-all duration-200 active:scale-95"
+                    >
+                        das
+                    </button>
+                </div>
+
+                <!-- Feedback Message -->
+                <p id="feedback" class="mt-8 text-lg h-8 transition-opacity duration-200"></p>
+            </div>
+        </main>
+
+        <!-- Footer -->
+        <footer class="text-center text-slate-500 text-sm mt-8">
+            Learn German noun genders through practice
+        </footer>
+    </div>
+
+    <script>
+        // Game state
+        let nouns = [];
+        let shuffledNouns = [];
+        let currentIndex = 0;
+        let currentNoun = null;
+        let currentStreak = 0;
+        let highestStreak = parseInt(localStorage.getItem('dudelsack_highestStreak')) || 0;
+        let isTransitioning = false;
+
+        // DOM elements
+        const loadingState = document.getElementById('loadingState');
+        const errorState = document.getElementById('errorState');
+        const gameArea = document.getElementById('gameArea');
+        const wordDisplay = document.getElementById('currentWord');
+        const currentStreakDisplay = document.getElementById('currentStreak');
+        const highestStreakDisplay = document.getElementById('highestStreak');
+        const nounCountDisplay = document.getElementById('nounCount');
+        const feedback = document.getElementById('feedback');
+        const buttons = document.querySelectorAll('.article-btn');
+        const retryBtn = document.getElementById('retryBtn');
+
+        // Audio context for sound effects
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        let audioCtx = null;
+
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new AudioContext();
+            }
+        }
+
+        function playTone(frequency, duration, type = 'sine', gain = 0.3) {
+            initAudio();
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+
+            oscillator.frequency.value = frequency;
+            oscillator.type = type;
+            gainNode.gain.value = gain;
+
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
+
+            oscillator.start(audioCtx.currentTime);
+            oscillator.stop(audioCtx.currentTime + duration);
+        }
+
+        function playSuccessSound() {
+            playTone(523.25, 0.1);
+            setTimeout(() => playTone(659.25, 0.1), 100);
+            setTimeout(() => playTone(783.99, 0.2), 200);
+        }
+
+        function playErrorSound() {
+            playTone(200, 0.3, 'square', 0.2);
+        }
+
+        // Fisher-Yates shuffle for better randomization at scale
+        function shuffleArray(array) {
+            const shuffled = [...array];
+            for (let i = shuffled.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+            }
+            return shuffled;
+        }
+
+        function getNextNoun() {
+            // When we've gone through all nouns, reshuffle
+            if (currentIndex >= shuffledNouns.length) {
+                shuffledNouns = shuffleArray(nouns);
+                currentIndex = 0;
+            }
+            return shuffledNouns[currentIndex++];
+        }
+
+        function updateDisplay() {
+            currentStreakDisplay.textContent = currentStreak;
+            highestStreakDisplay.textContent = highestStreak;
+        }
+
+        function resetButtons() {
+            buttons.forEach(btn => {
+                btn.classList.remove('bg-emerald-500', 'bg-red-500', 'shake');
+                btn.classList.add('bg-slate-700');
+                btn.disabled = false;
+            });
+        }
+
+        function showNewWord() {
+            currentNoun = getNextNoun();
+            wordDisplay.textContent = currentNoun.word;
+            wordDisplay.classList.remove('fade-in');
+            void wordDisplay.offsetWidth;
+            wordDisplay.classList.add('fade-in');
+            feedback.textContent = '';
+            feedback.classList.remove('text-emerald-400', 'text-red-400');
+            resetButtons();
+            isTransitioning = false;
+        }
+
+        function handleAnswer(selectedArticle, button) {
+            if (isTransitioning) return;
+
+            const isCorrect = selectedArticle === currentNoun.article;
+
+            if (isCorrect) {
+                isTransitioning = true;
+                playSuccessSound();
+
+                button.classList.remove('bg-slate-700');
+                button.classList.add('bg-emerald-500');
+
+                currentStreak++;
+                if (currentStreak > highestStreak) {
+                    highestStreak = currentStreak;
+                    localStorage.setItem('dudelsack_highestStreak', highestStreak);
+                }
+                updateDisplay();
+
+                feedback.textContent = 'Richtig!';
+                feedback.classList.add('text-emerald-400');
+
+                buttons.forEach(btn => btn.disabled = true);
+
+                setTimeout(showNewWord, 1000);
+            } else {
+                playErrorSound();
+
+                button.classList.remove('bg-slate-700');
+                button.classList.add('bg-red-500', 'shake');
+
+                currentStreak = 0;
+                updateDisplay();
+
+                feedback.textContent = 'Falsch! Versuch es nochmal.';
+                feedback.classList.add('text-red-400');
+
+                setTimeout(() => {
+                    button.classList.remove('bg-red-500', 'shake');
+                    button.classList.add('bg-slate-700');
+                }, 400);
+            }
+        }
+
+        // Load nouns from external JSON
+        async function loadNouns() {
+            loadingState.classList.remove('hidden');
+            errorState.classList.add('hidden');
+            gameArea.classList.add('hidden');
+
+            try {
+                const response = await fetch('nouns.json');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const data = await response.json();
+
+                if (!data.nouns || !Array.isArray(data.nouns) || data.nouns.length === 0) {
+                    throw new Error('Invalid data format');
+                }
+
+                nouns = data.nouns;
+                shuffledNouns = shuffleArray(nouns);
+                currentIndex = 0;
+
+                // Update UI
+                nounCountDisplay.textContent = `${nouns.length} nouns loaded`;
+                loadingState.classList.add('hidden');
+                gameArea.classList.remove('hidden');
+
+                // Start the game
+                updateDisplay();
+                showNewWord();
+            } catch (error) {
+                console.error('Failed to load nouns:', error);
+                loadingState.classList.add('hidden');
+                errorState.classList.remove('hidden');
+            }
+        }
+
+        // Event listeners
+        buttons.forEach(button => {
+            button.addEventListener('click', () => {
+                handleAnswer(button.dataset.article, button);
+            });
+        });
+
+        retryBtn.addEventListener('click', loadNouns);
+
+        // Keyboard support
+        document.addEventListener('keydown', (e) => {
+            if (gameArea.classList.contains('hidden')) return;
+
+            if (e.key === '1' || e.key.toLowerCase() === 'd') {
+                buttons[0].click();
+            } else if (e.key === '2' || e.key.toLowerCase() === 'i') {
+                buttons[1].click();
+            } else if (e.key === '3' || e.key.toLowerCase() === 'a') {
+                buttons[2].click();
+            }
+        });
+
+        // Initialize
+        loadNouns();
+    </script>
+</body>
+</html>
